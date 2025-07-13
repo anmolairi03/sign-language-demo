@@ -11,7 +11,6 @@ export class SignLanguageDetector {
   };
   private lastPredictionTime: number = 0;
   private gestureSequence: number[] = [];
-  private frameCount: number = 0;
 
   async initialize(): Promise<void> {
     try {
@@ -28,69 +27,93 @@ export class SignLanguageDetector {
     }
 
     this.isProcessing = true;
-    this.frameCount++;
 
     try {
+      // Simulate more realistic gesture detection with varied predictions
       const currentTime = Date.now();
       
-      // Always assume hand is present for demo purposes
-      // In real implementation, this would use MediaPipe hand detection
-      const handPresent = true; // Simplified for demo
+      // Create more realistic prediction patterns
+      const timeBasedVariation = Math.sin(currentTime / 3000) * 0.5 + 0.5; // Slow oscillation
+      const randomFactor = Math.random();
+      
+      // Simulate hand presence detection (based on image analysis simulation)
+      const handPresent = this.simulateHandDetection(imageData);
       
       if (!handPresent) {
         this.isProcessing = false;
         return null;
       }
 
-      // Generate realistic gesture predictions with time-based patterns
+      // Generate more realistic gesture predictions
       let gestureIndex: number;
       let confidence: number;
 
-      // Create alternating patterns every 3-5 seconds
-      const timePhase = Math.floor(currentTime / 4000) % 2; // Switch every 4 seconds
-      const randomVariation = Math.random();
-      const frameVariation = Math.sin(this.frameCount * 0.1) * 0.5 + 0.5;
-
-      if (timePhase === 0) {
-        // "Hello" phase
-        gestureIndex = randomVariation > 0.2 ? 0 : 1; // 80% hello, 20% thankyou
-        confidence = 0.75 + randomVariation * 0.2; // 75-95% confidence
+      // Create patterns that change over time for more realistic demo
+      if (timeBasedVariation > 0.6) {
+        // More likely to predict "thankyou"
+        gestureIndex = randomFactor > 0.3 ? 1 : 0;
+        confidence = 0.7 + randomFactor * 0.25;
       } else {
-        // "Thank you" phase  
-        gestureIndex = randomVariation > 0.2 ? 1 : 0; // 80% thankyou, 20% hello
-        confidence = 0.7 + randomVariation * 0.25; // 70-95% confidence
+        // More likely to predict "hello"
+        gestureIndex = randomFactor > 0.3 ? 0 : 1;
+        confidence = 0.65 + randomFactor * 0.3;
       }
 
-      // Add some frame-based variation for more natural feel
-      confidence = Math.min(0.95, confidence + frameVariation * 0.1);
-
-      // Add temporal consistency
+      // Add some temporal consistency
       this.gestureSequence.push(gestureIndex);
-      if (this.gestureSequence.length > 3) {
+      if (this.gestureSequence.length > 5) {
         this.gestureSequence.shift();
       }
 
       // Use most common gesture in recent sequence for stability
       const mostCommon = this.getMostCommonGesture();
-      if (mostCommon !== -1 && this.gestureSequence.length >= 2) {
+      if (mostCommon !== -1) {
         gestureIndex = mostCommon;
-        confidence = Math.min(confidence + 0.05, 0.95); // Slight boost for consistent gestures
+        confidence = Math.min(confidence + 0.1, 0.95); // Boost confidence for consistent gestures
       }
 
       this.lastPredictionTime = currentTime;
       this.isProcessing = false;
 
-      // Always return a result for demo purposes
-      return {
-        gesture: this.labelMap[gestureIndex],
-        confidence: Math.max(0.6, confidence) // Ensure minimum 60% confidence
-      };
+      // Return result only if confidence is reasonable
+      if (confidence > 0.6) {
+        return {
+          gesture: this.labelMap[gestureIndex],
+          confidence: confidence
+        };
+      }
 
+      return null;
     } catch (error) {
       console.error('Error detecting gesture:', error);
       this.isProcessing = false;
       return null;
     }
+  }
+
+  private simulateHandDetection(imageData: ImageData): boolean {
+    // Simulate hand detection based on image properties
+    // In a real implementation, this would use MediaPipe or similar
+    const pixels = imageData.data;
+    let skinColorPixels = 0;
+    const sampleSize = Math.min(1000, pixels.length / 4); // Sample subset for performance
+    
+    for (let i = 0; i < sampleSize * 4; i += 16) { // Sample every 4th pixel
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      
+      // Simple skin color detection (very basic)
+      if (r > 95 && g > 40 && b > 20 && 
+          Math.max(r, g, b) - Math.min(r, g, b) > 15 &&
+          Math.abs(r - g) > 15 && r > g && r > b) {
+        skinColorPixels++;
+      }
+    }
+    
+    // If we find enough skin-colored pixels, assume hand is present
+    const skinRatio = skinColorPixels / sampleSize;
+    return skinRatio > 0.02; // At least 2% skin-colored pixels
   }
 
   private getMostCommonGesture(): number {
@@ -111,13 +134,11 @@ export class SignLanguageDetector {
       }
     }
     
-    // Return most common if it appears in at least 50% of recent frames
-    return maxCount >= Math.ceil(this.gestureSequence.length * 0.5) ? mostCommon : -1;
+    // Only return if it appears in at least 60% of recent frames
+    return maxCount >= Math.ceil(this.gestureSequence.length * 0.6) ? mostCommon : -1;
   }
 
   dispose(): void {
     // Cleanup if needed
-    this.gestureSequence = [];
-    this.frameCount = 0;
   }
 }
