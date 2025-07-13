@@ -16,6 +16,31 @@ const WebcamFeed: React.FC = () => {
 
   const PROCESS_INTERVAL = 300; // Process every 300ms
 
+  // Force initial prediction after camera starts
+  useEffect(() => {
+    if (cameraReady && isDetecting) {
+      // Start with an initial prediction after 1 second
+      const timer = setTimeout(() => {
+        if (canvasRef.current && videoRef.current) {
+          const canvas = canvasRef.current;
+          const video = videoRef.current;
+          const ctx = canvas.getContext('2d');
+          
+          if (ctx && video.readyState === 4) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            processFrame(imageData);
+          }
+        }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [cameraReady, isDetecting, processFrame]);
+
   // Initialize camera only once when detection starts
   useEffect(() => {
     const setupCamera = async () => {

@@ -95,21 +95,19 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const processFrame = useCallback(async (imageData: ImageData) => {
-    if (!detectorRef.current || !isDetecting || processingRef.current) {
+    if (!detectorRef.current || !isDetecting) {
       return;
     }
-
-    processingRef.current = true;
 
     try {
       const result = await detectorRef.current.detectGesture(imageData);
       
-      if (result && result.confidence > 0.5) {
+      if (result) {
         setCurrentPrediction(result.gesture);
         setConfidence(result.confidence);
         
-        // Add to history if confidence is high enough and not a duplicate
-        if (result.confidence > 0.7) {
+        // Add to history if confidence is reasonable and not a duplicate
+        if (result.confidence > 0.65) {
           const newPrediction: Prediction = {
             gesture: result.gesture,
             confidence: result.confidence,
@@ -117,33 +115,26 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
           };
           
           setPredictionHistory(prev => {
-            // Avoid duplicate consecutive predictions within 2 seconds
+            // Avoid duplicate consecutive predictions within 1.5 seconds
             const lastPrediction = prev[prev.length - 1];
             if (lastPrediction && 
                 lastPrediction.gesture === newPrediction.gesture && 
-                newPrediction.timestamp - lastPrediction.timestamp < 2000) {
+                newPrediction.timestamp - lastPrediction.timestamp < 1500) {
               return prev;
             }
             
-            // Keep only last 15 predictions to avoid memory issues
+            // Keep only last 20 predictions to avoid memory issues
             const updated = [...prev, newPrediction];
-            return updated.slice(-15);
+            return updated.slice(-20);
           });
         }
       } else {
-        // Gradually reduce confidence when no gesture is detected
-        setConfidence(prev => {
-          const newConfidence = Math.max(0, prev - 0.05);
-          if (newConfidence < 0.3) {
-            setCurrentPrediction(null);
-          }
-          return newConfidence;
-        });
+        // Reset if no result
+        setCurrentPrediction(null);
+        setConfidence(0);
       }
     } catch (error) {
       console.error('Error processing frame:', error);
-    } finally {
-      processingRef.current = false;
     }
   }, [isDetecting]);
 
