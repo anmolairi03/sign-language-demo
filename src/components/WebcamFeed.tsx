@@ -8,10 +8,12 @@ const WebcamFeed: React.FC = () => {
   const { isDetecting, startDetection, stopDetection, processFrame } = useSignLanguage();
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
     let animationFrame: number;
+    let lastProcessTime = 0;
+    const PROCESS_INTERVAL = 200; // Process every 200ms to avoid overwhelming
 
     const setupCamera = async () => {
       if (!isDetecting) return;
@@ -20,7 +22,7 @@ const WebcamFeed: React.FC = () => {
       setError('');
       
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 640 },
             height: { ideal: 480 },
@@ -28,8 +30,10 @@ const WebcamFeed: React.FC = () => {
           }
         });
         
+        setStream(mediaStream);
+        
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = mediaStream;
           videoRef.current.onloadedmetadata = () => {
             setIsLoading(false);
             detectFrame();
@@ -45,17 +49,25 @@ const WebcamFeed: React.FC = () => {
     const detectFrame = () => {
       if (!isDetecting || !videoRef.current || !canvasRef.current) return;
       
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
+      const currentTime = Date.now();
       
-      if (ctx && video.readyState === 4) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
+      // Throttle processing to avoid overwhelming the system
+      if (currentTime - lastProcessTime >= PROCESS_INTERVAL) {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
         
-        // Process frame for hand detection
-        processFrame(canvas);
+        if (ctx && video.readyState === 4) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          
+          // Get image data for processing
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          processFrame(imageData);
+          
+          lastProcessTime = currentTime;
+        }
       }
       
       animationFrame = requestAnimationFrame(detectFrame);
@@ -66,14 +78,27 @@ const WebcamFeed: React.FC = () => {
     }
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
       if (animationFrame) {
         cancelAnimationFrame(animationFrame);
       }
     };
   }, [isDetecting, processFrame, stopDetection]);
+
+  // Cleanup stream when component unmounts or detection stops
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
+
+  useEffect(() => {
+    if (!isDetecting && stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+  }, [isDetecting, stream]);
 
   const handleToggleDetection = () => {
     if (isDetecting) {
@@ -146,13 +171,6 @@ const WebcamFeed: React.FC = () => {
           className="absolute inset-0 w-full h-full"
           style={{ display: 'none' }}
         />
-        
-        {/* Overlay for hand landmarks */}
-        <div className="absolute inset-0 pointer-events-none">
-          <svg className="w-full h-full">
-            {/* Hand landmarks will be drawn here */}
-          </svg>
-        </div>
       </div>
       
       <div className="mt-4 text-center">
