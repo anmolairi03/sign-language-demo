@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { SignLanguageDetector } from '../utils/SignLanguageDetector';
 
 interface Prediction {
@@ -37,7 +37,9 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [predictionHistory, setPredictionHistory] = useState<Prediction[]>([]);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelLoadingProgress, setModelLoadingProgress] = useState(0);
-  const [detector, setDetector] = useState<SignLanguageDetector | null>(null);
+  
+  const detectorRef = useRef<SignLanguageDetector | null>(null);
+  const processingRef = useRef<boolean>(false);
 
   useEffect(() => {
     const initializeDetector = async () => {
@@ -49,14 +51,14 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
               clearInterval(progressInterval);
               return 90;
             }
-            return prev + Math.random() * 10;
+            return prev + Math.random() * 15;
           });
-        }, 100);
+        }, 150);
 
         const newDetector = new SignLanguageDetector();
         await newDetector.initialize();
         
-        setDetector(newDetector);
+        detectorRef.current = newDetector;
         setModelLoaded(true);
         setModelLoadingProgress(100);
         clearInterval(progressInterval);
@@ -69,27 +71,38 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
 
     initializeDetector();
+
+    return () => {
+      if (detectorRef.current) {
+        detectorRef.current.dispose();
+      }
+    };
   }, []);
 
   const startDetection = useCallback(() => {
-    if (modelLoaded && detector) {
+    if (modelLoaded && detectorRef.current) {
       setIsDetecting(true);
       console.log('Detection started');
     }
-  }, [modelLoaded, detector]);
+  }, [modelLoaded]);
 
   const stopDetection = useCallback(() => {
     setIsDetecting(false);
     setCurrentPrediction(null);
     setConfidence(0);
+    processingRef.current = false;
     console.log('Detection stopped');
   }, []);
 
   const processFrame = useCallback(async (imageData: ImageData) => {
-    if (!detector || !isDetecting) return;
+    if (!detectorRef.current || !isDetecting || processingRef.current) {
+      return;
+    }
+
+    processingRef.current = true;
 
     try {
-      const result = await detector.detectGesture(imageData);
+      const result = await detectorRef.current.detectGesture(imageData);
       
       if (result && result.confidence > 0.5) {
         setCurrentPrediction(result.gesture);
@@ -104,30 +117,35 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
           };
           
           setPredictionHistory(prev => {
-            // Avoid duplicate consecutive predictions within 3 seconds
+            // Avoid duplicate consecutive predictions within 2 seconds
             const lastPrediction = prev[prev.length - 1];
             if (lastPrediction && 
                 lastPrediction.gesture === newPrediction.gesture && 
-                newPrediction.timestamp - lastPrediction.timestamp < 3000) {
+                newPrediction.timestamp - lastPrediction.timestamp < 2000) {
               return prev;
             }
             
-            // Keep only last 20 predictions to avoid memory issues
+            // Keep only last 15 predictions to avoid memory issues
             const updated = [...prev, newPrediction];
-            return updated.slice(-20);
+            return updated.slice(-15);
           });
         }
       } else {
         // Gradually reduce confidence when no gesture is detected
-        setConfidence(prev => Math.max(0, prev - 0.1));
-        if (confidence < 0.3) {
-          setCurrentPrediction(null);
-        }
+        setConfidence(prev => {
+          const newConfidence = Math.max(0, prev - 0.05);
+          if (newConfidence < 0.3) {
+            setCurrentPrediction(null);
+          }
+          return newConfidence;
+        });
       }
     } catch (error) {
       console.error('Error processing frame:', error);
+    } finally {
+      processingRef.current = false;
     }
-  }, [detector, isDetecting, confidence]);
+  }, [isDetecting]);
 
   const clearHistory = useCallback(() => {
     setPredictionHistory([]);

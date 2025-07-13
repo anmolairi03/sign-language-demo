@@ -5,21 +5,25 @@ import { useSignLanguage } from '../context/SignLanguageContext';
 const WebcamFeed: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { isDetecting, startDetection, stopDetection, processFrame } = useSignLanguage();
+  const streamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const lastProcessTimeRef = useRef<number>(0);
+  
+  const { isDetecting, startDetection, stopDetection, processFrame, currentPrediction, confidence } = useSignLanguage();
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
 
+  const PROCESS_INTERVAL = 300; // Process every 300ms
+
+  // Initialize camera only once when detection starts
   useEffect(() => {
-    let animationFrame: number;
-    let lastProcessTime = 0;
-    const PROCESS_INTERVAL = 200; // Process every 200ms to avoid overwhelming
-
     const setupCamera = async () => {
-      if (!isDetecting) return;
+      if (!isDetecting || streamRef.current) return;
       
       setIsLoading(true);
       setError('');
+      setCameraReady(false);
       
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -30,13 +34,14 @@ const WebcamFeed: React.FC = () => {
           }
         });
         
-        setStream(mediaStream);
+        streamRef.current = mediaStream;
         
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
           videoRef.current.onloadedmetadata = () => {
             setIsLoading(false);
-            detectFrame();
+            setCameraReady(true);
+            startProcessing();
           };
         }
       } catch (err) {
@@ -46,13 +51,23 @@ const WebcamFeed: React.FC = () => {
       }
     };
 
-    const detectFrame = () => {
-      if (!isDetecting || !videoRef.current || !canvasRef.current) return;
+    if (isDetecting && !streamRef.current) {
+      setupCamera();
+    }
+  }, [isDetecting, stopDetection]);
+
+  // Start processing frames
+  const startProcessing = () => {
+    if (animationFrameRef.current) return;
+
+    const processFrames = () => {
+      if (!isDetecting || !videoRef.current || !canvasRef.current || !cameraReady) {
+        return;
+      }
       
       const currentTime = Date.now();
       
-      // Throttle processing to avoid overwhelming the system
-      if (currentTime - lastProcessTime >= PROCESS_INTERVAL) {
+      if (currentTime - lastProcessTimeRef.current >= PROCESS_INTERVAL) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
@@ -62,43 +77,48 @@ const WebcamFeed: React.FC = () => {
           canvas.height = video.videoHeight;
           ctx.drawImage(video, 0, 0);
           
-          // Get image data for processing
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           processFrame(imageData);
           
-          lastProcessTime = currentTime;
+          lastProcessTimeRef.current = currentTime;
         }
       }
       
-      animationFrame = requestAnimationFrame(detectFrame);
+      animationFrameRef.current = requestAnimationFrame(processFrames);
     };
 
-    if (isDetecting) {
-      setupCamera();
+    processFrames();
+  };
+
+  // Stop processing and cleanup
+  const cleanup = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    setCameraReady(false);
+    setError('');
+  };
 
-    return () => {
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-      }
-    };
-  }, [isDetecting, processFrame, stopDetection]);
+  // Cleanup when detection stops
+  useEffect(() => {
+    if (!isDetecting) {
+      cleanup();
+    }
+  }, [isDetecting]);
 
-  // Cleanup stream when component unmounts or detection stops
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
+      cleanup();
     };
-  }, [stream]);
-
-  useEffect(() => {
-    if (!isDetecting && stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  }, [isDetecting, stream]);
+  }, []);
 
   const handleToggleDetection = () => {
     if (isDetecting) {
@@ -106,6 +126,12 @@ const WebcamFeed: React.FC = () => {
     } else {
       startDetection();
     }
+  };
+
+  const getConfidenceColor = (conf: number) => {
+    if (conf >= 0.8) return 'bg-green-500';
+    if (conf >= 0.6) return 'bg-yellow-500';
+    return 'bg-red-500';
   };
 
   return (
@@ -163,8 +189,42 @@ const WebcamFeed: React.FC = () => {
           playsInline
           muted
           className="w-full h-full object-cover"
-          style={{ transform: 'scaleX(-1)' }} // Mirror effect
+          style={{ transform: 'scaleX(-1)' }}
         />
+        
+        {/* Prediction Overlay */}
+        {isDetecting && cameraReady && (
+          <div className="absolute top-4 right-4 z-10">
+            <div className="bg-black/70 backdrop-blur-sm rounded-lg p-4 text-white min-w-[200px]">
+              <div className="text-center">
+                {currentPrediction ? (
+                  <>
+                    <div className="text-2xl font-bold mb-2 capitalize text-white">
+                      {currentPrediction}
+                    </div>
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${getConfidenceColor(confidence)}`}></div>
+                      <span className="text-sm">
+                        {(confidence * 100).toFixed(1)}% confidence
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-600 rounded-full h-1 mt-2">
+                      <div 
+                        className={`h-1 rounded-full transition-all duration-300 ${getConfidenceColor(confidence)}`}
+                        style={{ width: `${confidence * 100}%` }}
+                      ></div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-gray-300">
+                    <div className="text-lg mb-1">Detecting...</div>
+                    <div className="text-xs">Show your hand</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         
         <canvas
           ref={canvasRef}
