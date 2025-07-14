@@ -41,57 +41,72 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => {
     const initializeDetector = async () => {
-      const newDetector = new SignLanguageDetector();
-      
-      // Simulate model loading progress
-      const progressInterval = setInterval(() => {
-        setModelLoadingProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(progressInterval);
-            return 100;
-          }
-          return prev + Math.random() * 15;
-        });
-      }, 200);
-
       try {
+        console.log('Starting detector initialization...');
+        
+        // Simulate loading progress
+        const progressInterval = setInterval(() => {
+          setModelLoadingProgress(prev => {
+            if (prev >= 90) {
+              clearInterval(progressInterval);
+              return 90;
+            }
+            return prev + Math.random() * 10;
+          });
+        }, 100);
+
+        const newDetector = new SignLanguageDetector();
         await newDetector.initialize();
+        
         setDetector(newDetector);
         setModelLoaded(true);
         setModelLoadingProgress(100);
         clearInterval(progressInterval);
+        
+        console.log('Detector initialized successfully');
       } catch (error) {
         console.error('Failed to initialize detector:', error);
-        clearInterval(progressInterval);
+        setModelLoadingProgress(0);
       }
     };
 
     initializeDetector();
+
+    // Cleanup on unmount
+    return () => {
+      if (detector) {
+        detector.dispose();
+      }
+    };
   }, []);
 
   const startDetection = useCallback(() => {
-    if (modelLoaded) {
+    if (modelLoaded && detector) {
+      console.log('Starting detection...');
       setIsDetecting(true);
+    } else {
+      console.warn('Cannot start detection: model not loaded or detector not initialized');
     }
-  }, [modelLoaded]);
+  }, [modelLoaded, detector]);
 
   const stopDetection = useCallback(() => {
+    console.log('Stopping detection...');
     setIsDetecting(false);
     setCurrentPrediction(null);
     setConfidence(0);
   }, []);
 
   const processFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-    if (!detector || !isDetecting) return;
+    if (!detector || !isDetecting || !modelLoaded) return;
 
     try {
       const result = await detector.detectGesture(canvas);
       
-      if (result) {
+      if (result && result.confidence > 0.5) {
         setCurrentPrediction(result.gesture);
         setConfidence(result.confidence);
         
-        // Add to history if confidence is high enough
+        // Add to history if confidence is high enough and not a duplicate
         if (result.confidence > 0.7) {
           const newPrediction: Prediction = {
             gesture: result.gesture,
@@ -100,27 +115,34 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
           };
           
           setPredictionHistory(prev => {
-            // Avoid duplicate consecutive predictions
+            // Avoid duplicate consecutive predictions within 2 seconds
             const lastPrediction = prev[prev.length - 1];
             if (lastPrediction && 
                 lastPrediction.gesture === newPrediction.gesture && 
                 newPrediction.timestamp - lastPrediction.timestamp < 2000) {
               return prev;
             }
-            return [...prev, newPrediction];
+            
+            // Keep only last 50 predictions
+            const updated = [...prev, newPrediction];
+            return updated.slice(-50);
           });
         }
       } else {
-        setCurrentPrediction(null);
-        setConfidence(0);
+        // Gradually reduce confidence when no gesture is detected
+        setConfidence(prev => Math.max(0, prev * 0.9));
+        if (confidence < 0.3) {
+          setCurrentPrediction(null);
+        }
       }
     } catch (error) {
       console.error('Error processing frame:', error);
     }
-  }, [detector, isDetecting]);
+  }, [detector, isDetecting, modelLoaded, confidence]);
 
   const clearHistory = useCallback(() => {
     setPredictionHistory([]);
+    console.log('Prediction history cleared');
   }, []);
 
   const value: SignLanguageContextType = {

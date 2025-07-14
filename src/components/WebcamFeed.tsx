@@ -8,19 +8,26 @@ const WebcamFeed: React.FC = () => {
   const { isDetecting, startDetection, stopDetection, processFrame } = useSignLanguage();
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
     let animationFrame: number;
 
     const setupCamera = async () => {
-      if (!isDetecting) return;
+      if (!isDetecting) {
+        // Clean up existing stream
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+          setStream(null);
+        }
+        return;
+      }
       
       setIsLoading(true);
       setError('');
       
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 640 },
             height: { ideal: 480 },
@@ -28,15 +35,18 @@ const WebcamFeed: React.FC = () => {
           }
         });
         
+        setStream(mediaStream);
+        
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = mediaStream;
           videoRef.current.onloadedmetadata = () => {
             setIsLoading(false);
             detectFrame();
           };
         }
       } catch (err) {
-        setError('Camera access denied. Please enable camera permissions.');
+        console.error('Camera error:', err);
+        setError('Camera access denied. Please enable camera permissions and refresh the page.');
         setIsLoading(false);
         stopDetection();
       }
@@ -45,35 +55,47 @@ const WebcamFeed: React.FC = () => {
     const detectFrame = () => {
       if (!isDetecting || !videoRef.current || !canvasRef.current) return;
       
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      
-      if (ctx && video.readyState === 4) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
+      try {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
         
-        // Process frame for hand detection
-        processFrame(canvas);
+        if (ctx && video.readyState === 4) {
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 480;
+          
+          // Draw video frame to canvas
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Process frame for hand detection
+          processFrame(canvas);
+        }
+      } catch (error) {
+        console.error('Error in detectFrame:', error);
       }
       
-      animationFrame = requestAnimationFrame(detectFrame);
+      if (isDetecting) {
+        animationFrame = requestAnimationFrame(detectFrame);
+      }
     };
 
-    if (isDetecting) {
-      setupCamera();
-    }
+    setupCamera();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
       if (animationFrame) {
         cancelAnimationFrame(animationFrame);
       }
     };
-  }, [isDetecting, processFrame, stopDetection]);
+  }, [isDetecting, processFrame, stopDetection, stream]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
 
   const handleToggleDetection = () => {
     if (isDetecting) {
@@ -101,18 +123,30 @@ const WebcamFeed: React.FC = () => {
             }`}
             disabled={isLoading}
           >
-            {isDetecting ? <CameraOff className="w-5 h-5" /> : <Camera className="w-5 h-5" />}
+            {isLoading ? (
+              <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+            ) : isDetecting ? (
+              <CameraOff className="w-5 h-5" />
+            ) : (
+              <Camera className="w-5 h-5" />
+            )}
           </button>
         </div>
       </div>
       
       <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video">
         {error ? (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center justify-center p-4">
             <div className="text-center text-white">
               <AlertCircle className="w-12 h-12 mx-auto mb-4 text-red-400" />
               <p className="text-lg font-medium mb-2">Camera Error</p>
               <p className="text-sm text-gray-300">{error}</p>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+              >
+                Refresh Page
+              </button>
             </div>
           </div>
         ) : isLoading ? (
@@ -143,16 +177,8 @@ const WebcamFeed: React.FC = () => {
         
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full"
-          style={{ display: 'none' }}
+          className="absolute inset-0 w-full h-full opacity-0"
         />
-        
-        {/* Overlay for hand landmarks */}
-        <div className="absolute inset-0 pointer-events-none">
-          <svg className="w-full h-full">
-            {/* Hand landmarks will be drawn here */}
-          </svg>
-        </div>
       </div>
       
       <div className="mt-4 text-center">
