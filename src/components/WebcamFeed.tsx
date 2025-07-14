@@ -8,7 +8,14 @@ const WebcamFeed: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number>();
   
-  const { isDetecting, startDetection, stopDetection, processFrame } = useSignLanguage();
+  const { 
+    isDetecting, 
+    startDetection, 
+    stopDetection, 
+    processFrame,
+    currentPrediction,
+    confidence
+  } = useSignLanguage();
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -159,6 +166,30 @@ const WebcamFeed: React.FC = () => {
       </div>
       
       <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video">
+        {/* Prediction Overlay - Top Left Corner */}
+        {isDetecting && cameraReady && (
+          <div className="absolute top-4 left-4 z-10">
+            <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 text-white">
+              {currentPrediction ? (
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                  <div>
+                    <div className="font-bold text-lg capitalize">{currentPrediction}</div>
+                    <div className="text-xs text-gray-300">
+                      {(confidence * 100).toFixed(1)}% confidence
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
+                  <div className="text-sm text-gray-300">Detecting...</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {error ? (
           <div className="absolute inset-0 flex items-center justify-center p-4">
             <div className="text-center text-white">

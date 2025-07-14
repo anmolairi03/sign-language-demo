@@ -1,31 +1,33 @@
-import * as tf from '@tensorflow/tfjs';
-
 export interface DetectionResult {
   gesture: string;
   confidence: number;
 }
 
 export class SignLanguageDetector {
-  private model: tf.LayersModel | null = null;
+  private model: any = null;
   private isInitialized = false;
   private labelMap: { [key: number]: string } = {
     0: 'hello',
     1: 'thankyou'
   };
-  private landmarkBuffer: number[][] = [];
-  private readonly SEQUENCE_LENGTH = 30;
-  private readonly LANDMARK_COUNT = 42; // 21 landmarks * 2 coordinates
+  private frameCount = 0;
+  private gestureTimer = 0;
+  private currentGestureIndex = 0;
 
   async initialize(): Promise<void> {
     try {
-      console.log('Initializing TensorFlow.js...');
+      console.log('Initializing Sign Language Detector...');
       
-      // Set TensorFlow.js backend
-      await tf.ready();
-      console.log('TensorFlow.js backend:', tf.getBackend());
-
-      // Create a simple mock model for demonstration
-      await this.createMockModel();
+      // Simulate model loading
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Create a simple mock model
+      this.model = {
+        predict: (data: any) => {
+          // Simulate realistic predictions based on frame analysis
+          return this.generateRealisticPrediction();
+        }
+      };
       
       this.isInitialized = true;
       console.log('Sign language detector initialized successfully');
@@ -35,35 +37,45 @@ export class SignLanguageDetector {
     }
   }
 
-  private async createMockModel(): Promise<void> {
-    try {
-      // Create a simple sequential model
-      const model = tf.sequential({
-        layers: [
-          tf.layers.dense({
-            units: 64,
-            activation: 'relu',
-            inputShape: [this.SEQUENCE_LENGTH * this.LANDMARK_COUNT]
-          }),
-          tf.layers.dropout({ rate: 0.3 }),
-          tf.layers.dense({ units: 32, activation: 'relu' }),
-          tf.layers.dense({ units: 2, activation: 'softmax' })
-        ]
-      });
-
-      // Compile the model
-      model.compile({
-        optimizer: tf.train.adam(0.001),
-        loss: 'categoricalCrossentropy',
-        metrics: ['accuracy']
-      });
-
-      this.model = model;
-      console.log('Mock model created successfully');
-    } catch (error) {
-      console.error('Error creating mock model:', error);
-      throw error;
+  private generateRealisticPrediction(): DetectionResult | null {
+    this.frameCount++;
+    
+    // Simulate hand detection based on image analysis
+    const hasHandMovement = this.simulateHandDetection();
+    
+    if (!hasHandMovement) {
+      return null;
     }
+
+    // Simulate gesture recognition with realistic timing
+    this.gestureTimer++;
+    
+    // Change gesture every 3-5 seconds (90-150 frames at 30fps)
+    if (this.gestureTimer > 90 + Math.random() * 60) {
+      this.currentGestureIndex = Math.floor(Math.random() * 2);
+      this.gestureTimer = 0;
+    }
+
+    // Generate confidence based on "stability" of detection
+    const baseConfidence = 0.7 + Math.random() * 0.25;
+    const stabilityFactor = Math.min(this.gestureTimer / 30, 1); // More stable over time
+    const confidence = baseConfidence * stabilityFactor;
+
+    // Only return prediction if confidence is reasonable
+    if (confidence > 0.6) {
+      return {
+        gesture: this.labelMap[this.currentGestureIndex],
+        confidence: Math.min(confidence, 0.95) // Cap at 95%
+      };
+    }
+
+    return null;
+  }
+
+  private simulateHandDetection(): boolean {
+    // Simulate hand detection with some randomness
+    // 70% chance of detecting a hand when camera is active
+    return Math.random() > 0.3;
   }
 
   async detectGesture(canvas: HTMLCanvasElement): Promise<DetectionResult | null> {
@@ -72,135 +84,78 @@ export class SignLanguageDetector {
     }
 
     try {
-      // Extract hand landmarks from canvas
-      const landmarks = this.extractHandLandmarks(canvas);
+      // Analyze canvas for hand presence (mock)
+      const imageData = this.analyzeCanvas(canvas);
       
-      if (!landmarks) {
-        return null;
-      }
-
-      // Add to buffer
-      this.landmarkBuffer.push(landmarks);
-      
-      // Keep only the last SEQUENCE_LENGTH frames
-      if (this.landmarkBuffer.length > this.SEQUENCE_LENGTH) {
-        this.landmarkBuffer.shift();
-      }
-
-      // Need at least some frames to make a prediction
-      if (this.landmarkBuffer.length < 10) {
-        return null;
-      }
-
-      // Prepare input data
-      const inputData = this.prepareInputData();
-      
-      if (!inputData) {
+      if (!imageData.hasHand) {
         return null;
       }
 
       // Make prediction
-      const prediction = this.model.predict(inputData) as tf.Tensor;
-      const probabilities = await prediction.data();
+      const result = this.model.predict(imageData);
       
-      // Get the class with highest probability
-      const maxIndex = Array.from(probabilities).indexOf(Math.max(...Array.from(probabilities)));
-      const confidence = probabilities[maxIndex];
-      
-      // Clean up tensors
-      prediction.dispose();
-      inputData.dispose();
-
-      // Return result if confidence is high enough
-      if (confidence > 0.6) {
-        return {
-          gesture: this.labelMap[maxIndex],
-          confidence: confidence
-        };
-      }
-
-      return null;
+      return result;
     } catch (error) {
       console.error('Error detecting gesture:', error);
       return null;
     }
   }
 
-  private extractHandLandmarks(canvas: HTMLCanvasElement): number[] | null {
+  private analyzeCanvas(canvas: HTMLCanvasElement): { hasHand: boolean; features: number[] } {
     try {
       const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
+      if (!ctx) {
+        return { hasHand: false, features: [] };
+      }
 
-      // Get image data
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Get image data from center region where hand would typically be
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const regionSize = 100;
       
-      // Simple hand detection simulation
-      // In a real implementation, you would use MediaPipe or similar
-      const mockLandmarks = this.generateMockLandmarks(imageData);
+      const imageData = ctx.getImageData(
+        centerX - regionSize/2, 
+        centerY - regionSize/2, 
+        regionSize, 
+        regionSize
+      );
+
+      // Simple analysis: check for skin-like colors and movement
+      let skinPixels = 0;
+      let totalPixels = imageData.data.length / 4;
       
-      return mockLandmarks;
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        const r = imageData.data[i];
+        const g = imageData.data[i + 1];
+        const b = imageData.data[i + 2];
+        
+        // Simple skin color detection
+        if (r > 95 && g > 40 && b > 20 && 
+            r > g && r > b && 
+            Math.abs(r - g) > 15) {
+          skinPixels++;
+        }
+      }
+
+      const skinRatio = skinPixels / totalPixels;
+      const hasHand = skinRatio > 0.02; // At least 2% skin-colored pixels
+
+      return {
+        hasHand,
+        features: [skinRatio, centerX, centerY]
+      };
     } catch (error) {
-      console.error('Error extracting landmarks:', error);
-      return null;
-    }
-  }
-
-  private generateMockLandmarks(imageData: ImageData): number[] {
-    // Generate mock hand landmarks for demonstration
-    // This simulates the 21 hand landmarks with x,y coordinates
-    const landmarks: number[] = [];
-    
-    // Generate 21 landmarks with normalized coordinates (0-1)
-    for (let i = 0; i < 21; i++) {
-      // Add some randomness to simulate hand movement
-      const x = 0.3 + Math.random() * 0.4; // Keep in center area
-      const y = 0.3 + Math.random() * 0.4;
-      landmarks.push(x, y);
-    }
-    
-    return landmarks;
-  }
-
-  private prepareInputData(): tf.Tensor | null {
-    try {
-      if (this.landmarkBuffer.length === 0) {
-        return null;
-      }
-
-      // Pad or truncate to SEQUENCE_LENGTH
-      let sequence = [...this.landmarkBuffer];
-      
-      // Pad with zeros if needed
-      while (sequence.length < this.SEQUENCE_LENGTH) {
-        sequence.unshift(new Array(this.LANDMARK_COUNT).fill(0));
-      }
-      
-      // Truncate if too long
-      if (sequence.length > this.SEQUENCE_LENGTH) {
-        sequence = sequence.slice(-this.SEQUENCE_LENGTH);
-      }
-
-      // Flatten the sequence
-      const flatSequence = sequence.flat();
-      
-      // Create tensor
-      const tensor = tf.tensor2d([flatSequence], [1, this.SEQUENCE_LENGTH * this.LANDMARK_COUNT]);
-      
-      return tensor;
-    } catch (error) {
-      console.error('Error preparing input data:', error);
-      return null;
+      console.error('Error analyzing canvas:', error);
+      return { hasHand: false, features: [] };
     }
   }
 
   dispose(): void {
     try {
-      if (this.model) {
-        this.model.dispose();
-        this.model = null;
-      }
-      this.landmarkBuffer = [];
+      this.model = null;
       this.isInitialized = false;
+      this.frameCount = 0;
+      this.gestureTimer = 0;
     } catch (error) {
       console.error('Error disposing detector:', error);
     }

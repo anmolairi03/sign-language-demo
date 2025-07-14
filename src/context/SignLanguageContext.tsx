@@ -117,18 +117,23 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const processFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-    if (!detectorRef.current || !isDetecting || !modelLoaded || processingRef.current) {
+    if (!detectorRef.current || !isDetecting || !modelLoaded) {
       return;
     }
 
-    // Throttle processing to avoid overwhelming the system
-    const now = Date.now();
-    if (now - lastProcessTimeRef.current < 100) { // Process at most 10 FPS
+    // Prevent concurrent processing
+    if (processingRef.current) {
       return;
     }
     
-    lastProcessTimeRef.current = now;
+    // Throttle processing to avoid overwhelming the system
+    const now = Date.now();
+    if (now - lastProcessTimeRef.current < 200) { // Process at most 5 FPS
+      return;
+    }
+    
     processingRef.current = true;
+    lastProcessTimeRef.current = now;
 
     try {
       const result = await detectorRef.current.detectGesture(canvas);
@@ -142,8 +147,10 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setCurrentPrediction(result.gesture);
         setConfidence(result.confidence);
         
+        console.log(`Detected: ${result.gesture} (${(result.confidence * 100).toFixed(1)}%)`);
+        
         // Add to history if confidence is high enough and not a duplicate
-        if (result.confidence > 0.7) {
+        if (result.confidence > 0.65) {
           const newPrediction: Prediction = {
             gesture: result.gesture,
             confidence: result.confidence,
@@ -155,7 +162,7 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
             const lastPrediction = prev[prev.length - 1];
             if (lastPrediction && 
                 lastPrediction.gesture === newPrediction.gesture && 
-                newPrediction.timestamp - lastPrediction.timestamp < 2000) {
+                newPrediction.timestamp - lastPrediction.timestamp < 1500) {
               return prev;
             }
             
@@ -166,13 +173,12 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } else {
         // Gradually reduce confidence when no gesture is detected
-        setConfidence(prev => {
-          const newConf = Math.max(0, prev * 0.9);
-          if (newConf < 0.3) {
-            setCurrentPrediction(null);
-          }
-          return newConf;
-        });
+        setConfidence(prev => Math.max(0, prev * 0.95));
+        
+        // Clear prediction if confidence drops too low
+        if (confidence < 0.4) {
+          setCurrentPrediction(null);
+        }
       }
     } catch (error) {
       console.error('Error processing frame:', error);
