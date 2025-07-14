@@ -1,101 +1,125 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Camera, CameraOff, AlertCircle } from 'lucide-react';
 import { useSignLanguage } from '../context/SignLanguageContext';
 
 const WebcamFeed: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<number>();
+  
   const { isDetecting, startDetection, stopDetection, processFrame } = useSignLanguage();
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
 
-  useEffect(() => {
-    let animationFrame: number;
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = undefined;
+    }
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+      });
+      streamRef.current = null;
+    }
+    
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    
+    setCameraReady(false);
+  }, []);
 
-    const setupCamera = async () => {
-      if (!isDetecting) {
-        // Clean up existing stream
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-          setStream(null);
+  // Initialize camera
+  const initializeCamera = useCallback(async () => {
+    if (!isDetecting || isLoading || cameraReady) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user'
         }
+      });
+
+      streamRef.current = mediaStream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+        
+        const handleLoadedMetadata = () => {
+          setIsLoading(false);
+          setCameraReady(true);
+          startDetectionLoop();
+        };
+
+        videoRef.current.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+      }
+    } catch (err) {
+      console.error('Camera error:', err);
+      setError('Camera access denied. Please enable camera permissions and refresh the page.');
+      setIsLoading(false);
+      stopDetection();
+    }
+  }, [isDetecting, isLoading, cameraReady, stopDetection]);
+
+  // Detection loop
+  const startDetectionLoop = useCallback(() => {
+    const detectFrame = () => {
+      if (!isDetecting || !videoRef.current || !canvasRef.current || !cameraReady) {
         return;
       }
-      
-      setIsLoading(true);
-      setError('');
-      
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user'
-          }
-        });
-        
-        setStream(mediaStream);
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          videoRef.current.onloadedmetadata = () => {
-            setIsLoading(false);
-            detectFrame();
-          };
-        }
-      } catch (err) {
-        console.error('Camera error:', err);
-        setError('Camera access denied. Please enable camera permissions and refresh the page.');
-        setIsLoading(false);
-        stopDetection();
-      }
-    };
 
-    const detectFrame = () => {
-      if (!isDetecting || !videoRef.current || !canvasRef.current) return;
-      
       try {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
-        
+
         if (ctx && video.readyState === 4) {
           canvas.width = video.videoWidth || 640;
           canvas.height = video.videoHeight || 480;
-          
+
           // Draw video frame to canvas
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          
+
           // Process frame for hand detection
           processFrame(canvas);
         }
       } catch (error) {
         console.error('Error in detectFrame:', error);
       }
-      
-      if (isDetecting) {
-        animationFrame = requestAnimationFrame(detectFrame);
+
+      if (isDetecting && cameraReady) {
+        animationFrameRef.current = requestAnimationFrame(detectFrame);
       }
     };
 
-    setupCamera();
+    detectFrame();
+  }, [isDetecting, cameraReady, processFrame]);
 
-    return () => {
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-      }
-    };
-  }, [isDetecting, processFrame, stopDetection, stream]);
+  // Handle detection state changes
+  useEffect(() => {
+    if (isDetecting && !cameraReady && !isLoading) {
+      initializeCamera();
+    } else if (!isDetecting) {
+      cleanup();
+    }
+  }, [isDetecting, cameraReady, isLoading, initializeCamera, cleanup]);
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [stream]);
+    return cleanup;
+  }, [cleanup]);
 
   const handleToggleDetection = () => {
     if (isDetecting) {
@@ -110,9 +134,9 @@ const WebcamFeed: React.FC = () => {
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-xl font-semibold text-gray-900">Camera Feed</h3>
         <div className="flex items-center space-x-3">
-          <span className={`status-indicator ${isDetecting ? 'status-active' : 'status-inactive'}`}>
-            <div className={`w-2 h-2 rounded-full mr-2 ${isDetecting ? 'bg-accent-500 animate-pulse' : 'bg-gray-400'}`}></div>
-            {isDetecting ? 'Active' : 'Inactive'}
+          <span className={`status-indicator ${cameraReady && isDetecting ? 'status-active' : 'status-inactive'}`}>
+            <div className={`w-2 h-2 rounded-full mr-2 ${cameraReady && isDetecting ? 'bg-accent-500 animate-pulse' : 'bg-gray-400'}`}></div>
+            {cameraReady && isDetecting ? 'Active' : 'Inactive'}
           </span>
           <button
             onClick={handleToggleDetection}
@@ -142,10 +166,16 @@ const WebcamFeed: React.FC = () => {
               <p className="text-lg font-medium mb-2">Camera Error</p>
               <p className="text-sm text-gray-300">{error}</p>
               <button 
-                onClick={() => window.location.reload()} 
+                onClick={() => {
+                  setError('');
+                  if (isDetecting) {
+                    cleanup();
+                    setTimeout(() => initializeCamera(), 100);
+                  }
+                }} 
                 className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
               >
-                Refresh Page
+                Retry
               </button>
             </div>
           </div>
@@ -172,7 +202,7 @@ const WebcamFeed: React.FC = () => {
           playsInline
           muted
           className="w-full h-full object-cover"
-          style={{ transform: 'scaleX(-1)' }} // Mirror effect
+          style={{ transform: 'scaleX(-1)' }}
         />
         
         <canvas

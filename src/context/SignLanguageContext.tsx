@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { SignLanguageDetector } from '../utils/SignLanguageDetector';
 
 interface Prediction {
@@ -37,15 +37,26 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [predictionHistory, setPredictionHistory] = useState<Prediction[]>([]);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelLoadingProgress, setModelLoadingProgress] = useState(0);
-  const [detector, setDetector] = useState<SignLanguageDetector | null>(null);
+  
+  const detectorRef = useRef<SignLanguageDetector | null>(null);
+  const lastProcessTimeRef = useRef<number>(0);
+  const processingRef = useRef<boolean>(false);
 
+  // Initialize detector once
   useEffect(() => {
+    let isMounted = true;
+    
     const initializeDetector = async () => {
       try {
         console.log('Starting detector initialization...');
         
         // Simulate loading progress
         const progressInterval = setInterval(() => {
+          if (!isMounted) {
+            clearInterval(progressInterval);
+            return;
+          }
+          
           setModelLoadingProgress(prev => {
             if (prev >= 90) {
               clearInterval(progressInterval);
@@ -58,49 +69,74 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const newDetector = new SignLanguageDetector();
         await newDetector.initialize();
         
-        setDetector(newDetector);
-        setModelLoaded(true);
-        setModelLoadingProgress(100);
-        clearInterval(progressInterval);
+        if (isMounted) {
+          detectorRef.current = newDetector;
+          setModelLoaded(true);
+          setModelLoadingProgress(100);
+          console.log('Detector initialized successfully');
+        } else {
+          // Component unmounted, cleanup
+          newDetector.dispose();
+        }
         
-        console.log('Detector initialized successfully');
+        clearInterval(progressInterval);
       } catch (error) {
         console.error('Failed to initialize detector:', error);
-        setModelLoadingProgress(0);
+        if (isMounted) {
+          setModelLoadingProgress(0);
+        }
       }
     };
 
     initializeDetector();
 
-    // Cleanup on unmount
     return () => {
-      if (detector) {
-        detector.dispose();
+      isMounted = false;
+      if (detectorRef.current) {
+        detectorRef.current.dispose();
+        detectorRef.current = null;
       }
     };
-  }, []);
+  }, []); // Empty dependency array - only run once
 
   const startDetection = useCallback(() => {
-    if (modelLoaded && detector) {
+    if (modelLoaded && detectorRef.current) {
       console.log('Starting detection...');
       setIsDetecting(true);
     } else {
       console.warn('Cannot start detection: model not loaded or detector not initialized');
     }
-  }, [modelLoaded, detector]);
+  }, [modelLoaded]);
 
   const stopDetection = useCallback(() => {
     console.log('Stopping detection...');
     setIsDetecting(false);
     setCurrentPrediction(null);
     setConfidence(0);
+    processingRef.current = false;
   }, []);
 
   const processFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-    if (!detector || !isDetecting || !modelLoaded) return;
+    if (!detectorRef.current || !isDetecting || !modelLoaded || processingRef.current) {
+      return;
+    }
+
+    // Throttle processing to avoid overwhelming the system
+    const now = Date.now();
+    if (now - lastProcessTimeRef.current < 100) { // Process at most 10 FPS
+      return;
+    }
+    
+    lastProcessTimeRef.current = now;
+    processingRef.current = true;
 
     try {
-      const result = await detector.detectGesture(canvas);
+      const result = await detectorRef.current.detectGesture(canvas);
+      
+      if (!isDetecting) {
+        processingRef.current = false;
+        return;
+      }
       
       if (result && result.confidence > 0.5) {
         setCurrentPrediction(result.gesture);
@@ -130,15 +166,20 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } else {
         // Gradually reduce confidence when no gesture is detected
-        setConfidence(prev => Math.max(0, prev * 0.9));
-        if (confidence < 0.3) {
-          setCurrentPrediction(null);
-        }
+        setConfidence(prev => {
+          const newConf = Math.max(0, prev * 0.9);
+          if (newConf < 0.3) {
+            setCurrentPrediction(null);
+          }
+          return newConf;
+        });
       }
     } catch (error) {
       console.error('Error processing frame:', error);
+    } finally {
+      processingRef.current = false;
     }
-  }, [detector, isDetecting, modelLoaded, confidence]);
+  }, [isDetecting, modelLoaded]);
 
   const clearHistory = useCallback(() => {
     setPredictionHistory([]);
