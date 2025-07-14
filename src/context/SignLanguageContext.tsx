@@ -117,18 +117,13 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const processFrame = useCallback(async (canvas: HTMLCanvasElement) => {
-    if (!detectorRef.current || !isDetecting || !modelLoaded) {
+    if (!detectorRef.current || !isDetecting || !modelLoaded || processingRef.current) {
       return;
     }
 
-    // Prevent concurrent processing
-    if (processingRef.current) {
-      return;
-    }
-    
     // Throttle processing to avoid overwhelming the system
     const now = Date.now();
-    if (now - lastProcessTimeRef.current < 200) { // Process at most 5 FPS
+    if (now - lastProcessTimeRef.current < 100) { // Process at 10 FPS
       return;
     }
     
@@ -144,13 +139,13 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
       
       if (result && result.confidence > 0.5) {
+        console.log(`🎯 Prediction: ${result.gesture} (${(result.confidence * 100).toFixed(1)}%)`);
+        
         setCurrentPrediction(result.gesture);
         setConfidence(result.confidence);
         
-        console.log(`Detected: ${result.gesture} (${(result.confidence * 100).toFixed(1)}%)`);
-        
         // Add to history if confidence is high enough and not a duplicate
-        if (result.confidence > 0.65) {
+        if (result.confidence > 0.6) {
           const newPrediction: Prediction = {
             gesture: result.gesture,
             confidence: result.confidence,
@@ -173,10 +168,10 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
       } else {
         // Gradually reduce confidence when no gesture is detected
-        setConfidence(prev => Math.max(0, prev * 0.95));
+        setConfidence(prev => Math.max(0, prev * 0.9));
         
         // Clear prediction if confidence drops too low
-        if (confidence < 0.4) {
+        if (confidence < 0.3) {
           setCurrentPrediction(null);
         }
       }
@@ -185,7 +180,7 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } finally {
       processingRef.current = false;
     }
-  }, [isDetecting, modelLoaded]);
+  }, [isDetecting, modelLoaded, confidence]);
 
   const clearHistory = useCallback(() => {
     setPredictionHistory([]);
