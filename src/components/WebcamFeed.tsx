@@ -168,22 +168,22 @@ const WebcamFeed: React.FC = () => {
       <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video">
         {/* Prediction Overlay - Top Left Corner */}
         {isDetecting && cameraReady && (
-          <div className="absolute top-4 left-4 z-10">
-            <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 text-white">
+          <div className="absolute top-4 left-4 z-20">
+            <div className="bg-black/80 backdrop-blur-md rounded-xl px-4 py-3 text-white border border-white/20">
               {currentPrediction ? (
                 <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse shadow-lg"></div>
                   <div>
-                    <div className="font-bold text-lg capitalize">{currentPrediction}</div>
-                    <div className="text-xs text-gray-300">
+                    <div className="font-bold text-xl capitalize text-green-400">{currentPrediction}</div>
+                    <div className="text-sm text-gray-300">
                       {(confidence * 100).toFixed(1)}% confidence
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
-                  <div className="text-sm text-gray-300">Detecting...</div>
+                  <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse"></div>
+                  <div className="text-lg text-yellow-400 font-medium">Detecting...</div>
                 </div>
               )}
             </div>
