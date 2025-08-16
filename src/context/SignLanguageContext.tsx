@@ -126,9 +126,9 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return;
     }
     
-    // Throttle processing to 5 FPS for stability
+    // Throttle processing to 8 FPS for better responsiveness
     const now = Date.now();
-    if (now - lastProcessTimeRef.current < 200) {
+    if (now - lastProcessTimeRef.current < 125) {
       return;
     }
     
@@ -143,14 +143,14 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return;
       }
       
-      if (result && result.confidence > 0.5) {
+      if (result && result.confidence > 0.6) {
         console.log(`🎯 DETECTED: ${result.gesture} (${(result.confidence * 100).toFixed(1)}%)`);
         
         setCurrentPrediction(result.gesture);
         setConfidence(result.confidence);
         
-        // Add to history if confidence is reasonable
-        if (result.confidence > 0.5) {
+        // Add to history if confidence is good
+        if (result.confidence > 0.7) {
           const newPrediction: Prediction = {
             gesture: result.gesture,
             confidence: result.confidence,
@@ -158,11 +158,11 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
           };
           
           setPredictionHistory(prev => {
-            // Avoid duplicate consecutive predictions within 2 seconds
+            // Avoid duplicate consecutive predictions within 1.5 seconds
             const lastPrediction = prev[prev.length - 1];
             if (lastPrediction && 
                 lastPrediction.gesture === newPrediction.gesture && 
-                newPrediction.timestamp - lastPrediction.timestamp < 2000) {
+                newPrediction.timestamp - lastPrediction.timestamp < 1500) {
               return prev;
             }
             
@@ -172,11 +172,11 @@ export const SignLanguageProvider: React.FC<{ children: React.ReactNode }> = ({ 
           });
         }
       } else {
-        // More gradual confidence reduction
-        setConfidence(prev => Math.max(0, prev * 0.95));
+        // Gradual confidence reduction when no detection
+        setConfidence(prev => Math.max(0, prev * 0.9));
         
-        // Clear prediction if confidence drops below threshold
-        if (confidence < 0.4) {
+        // Clear prediction if confidence drops too low
+        if (confidence < 0.3) {
           setCurrentPrediction(null);
         }
       }
